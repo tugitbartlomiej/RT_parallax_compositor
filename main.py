@@ -5,6 +5,8 @@ from PIL import Image
 from ultralytics import YOLO
 from simple_lama_inpainting import SimpleLama
 import torch
+import threading
+import time
 
 class RealTimePeopleSegmenter:
     def __init__(self, model_path, inpainting_device):
@@ -44,45 +46,40 @@ class RealTimePeopleSegmenter:
         left_mask = self._segment_image(left_frame)
         right_mask = self._segment_image(right_frame)
 
-        # Ensure masks are uint8 type and binary
         left_mask = left_mask.astype(np.uint8)
         right_mask = right_mask.astype(np.uint8)
 
         left_mask[left_mask > 0] = 255
         right_mask[right_mask > 0] = 255
 
-        left_mask_dilated = cv2.morphologyEx(left_mask, cv2.MORPH_DILATE, np.ones((17, 17), np.uint8), iterations=16)
-        right_mask_dilated = cv2.morphologyEx(right_mask, cv2.MORPH_DILATE, np.ones((17, 17), np.uint8), iterations=16)
+        left_mask_dilated = cv2.dilate(left_mask, np.ones((17, 17), np.uint8), iterations=16)
+        right_mask_dilated = cv2.dilate(right_mask, np.ones((17, 17), np.uint8), iterations=16)
 
         inpainted_left_background = self._inpaint_image(right_frame, left_mask_dilated)
         inpainted_right_background = self._inpaint_image(left_frame, right_mask_dilated)
 
-        # Resize inpainted backgrounds and masks to match the original frames
         inpainted_left_background = self.resize_to_match(inpainted_left_background, left_frame)
         inpainted_right_background = self.resize_to_match(inpainted_right_background, right_frame)
         left_mask_dilated = self.resize_to_match(left_mask_dilated, left_frame)
         right_mask_dilated = self.resize_to_match(right_mask_dilated, right_frame)
 
         left_frame_person = cv2.bitwise_and(left_frame, left_frame, mask=left_mask)
-
         left_mask_not = cv2.bitwise_not(left_mask)
-        right_background_inpainted = self.resize_to_match(inpainted_right_background, left_frame) # Resize to match
+        right_background_inpainted = self.resize_to_match(inpainted_right_background, left_frame)
         right_background_inpainted = cv2.bitwise_and(right_background_inpainted, right_background_inpainted, mask=left_mask_not)
 
         left_frame_person = cv2.cvtColor(left_frame_person, cv2.COLOR_BGRA2BGR)
         left_result = cv2.bitwise_or(left_frame_person, right_background_inpainted)
 
         right_frame_person = cv2.bitwise_and(right_frame, right_frame, mask=right_mask)
-
         right_mask_not = cv2.bitwise_not(right_mask)
-        left_background_inpainted = self.resize_to_match(inpainted_left_background, right_frame) # Resize to match
+        left_background_inpainted = self.resize_to_match(inpainted_left_background, right_frame)
         left_background_inpainted = cv2.bitwise_and(left_background_inpainted, left_background_inpainted, mask=right_mask_not)
 
         right_frame_person = cv2.cvtColor(right_frame_person, cv2.COLOR_BGRA2BGR)
         right_result = cv2.bitwise_or(right_frame_person, left_background_inpainted)
 
         return left_result, right_result
-
 
 def read_config(file_path):
     config = {}
